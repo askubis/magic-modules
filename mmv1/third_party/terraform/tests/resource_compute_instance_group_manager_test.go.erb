@@ -1339,6 +1339,10 @@ data "google_compute_image" "my_image" {
   project = "debian-cloud"
 }
 
+resource "google_compute_network" "additionalnetwork" {
+  name = "additionalnetwork"
+}
+
 resource "google_compute_instance_template" "igm-basic" {
   name           = "%s"
   machine_type   = "e2-medium"
@@ -1365,6 +1369,10 @@ resource "google_compute_instance_template" "igm-basic" {
 
   network_interface {
     network = "default"
+  }
+
+  network_interface {
+    network = "additionalnetwork"
   }
 
   service_account {
@@ -1393,6 +1401,15 @@ resource "google_compute_instance_group_manager" "igm-basic" {
     device_name = "my-stateful-disk"
     delete_rule = "ON_PERMANENT_INSTANCE_DELETION"
   }
+
+  stateful_internal_ip {
+    delete_rule = "ON_PERMANENT_INSTANCE_DELETION"
+  }
+
+  stateful_external_ip {
+    interface_name = "nic0"
+    delete_rule = "NEVER"
+  }
 }
 
 resource "google_compute_http_health_check" "zero" {
@@ -1409,6 +1426,10 @@ func testAccInstanceGroupManager_statefulUpdated(template, target, igm, hck stri
 data "google_compute_image" "my_image" {
   family  = "debian-9"
   project = "debian-cloud"
+}
+
+resource "google_compute_network" "additionalnetwork" {
+  name = "additionalnetwork"
 }
 
 resource "google_compute_instance_template" "igm-basic" {
@@ -1437,6 +1458,10 @@ resource "google_compute_instance_template" "igm-basic" {
 
   network_interface {
     network = "default"
+  }
+
+  network_interface {
+    network = "additionalnetwork"
   }
 
   service_account {
@@ -1468,6 +1493,25 @@ resource "google_compute_instance_group_manager" "igm-basic" {
 
   stateful_disk {
     device_name = "my-stateful-disk2"
+    delete_rule = "ON_PERMANENT_INSTANCE_DELETION"
+  }
+
+  stateful_internal_ip {
+    delete_rule = "ON_PERMANENT_INSTANCE_DELETION"
+  }
+
+  stateful_internal_ip {
+    interface_name = "nic1"
+    delete_rule = "NEVER"
+  }
+
+  stateful_external_ip {
+    interface_name = "nic0"
+    delete_rule = "NEVER"
+  }
+
+  stateful_external_ip {
+    interface_name = "nic1"
     delete_rule = "ON_PERMANENT_INSTANCE_DELETION"
   }
 }
