@@ -767,6 +767,7 @@ func resourceComputeInstanceGroupManagerUpdate(d *schema.ResourceData, meta inte
 		change = true
 	}
 	<% end -%>
+	log.Printf("[aaaskubis] updatedManager.StatefulPolicy.PreservedState: %s", updatedManager.StatefulPolicy.PreservedState)
 
 	if change {
 		op, err := config.NewComputeClient(userAgent).InstanceGroupManagers.Patch(project, zone, d.Get("name").(string), updatedManager).Do()
@@ -931,7 +932,10 @@ func expandAutoHealingPolicies(configured []interface{}) []*compute.InstanceGrou
 	}
 	return autoHealingPolicies
 }
-func expandStatefulPolicy(d TerraformResourceData) *compute.StatefulPolicy {
+func expandStatefulPolicy(d *schema.ResourceData) *compute.StatefulPolicy {
+	log.Printf("[aaaskubis] starting expandStatefulPolicy")
+	preservedState := &compute.StatefulPolicyPreservedState{
+	}
 	stateful_disks := d.Get("stateful_disk").(*schema.Set).List()
 	disks := make(map[string]compute.StatefulPolicyPreservedStateDiskDevice)
 	for _, raw := range stateful_disks {
@@ -941,35 +945,65 @@ func expandStatefulPolicy(d TerraformResourceData) *compute.StatefulPolicy {
 		}
 		disks[data["device_name"].(string)] = disk
 	}
-	result_internal_ips := make(map[string]compute.StatefulPolicyPreservedStateNetworkIp)
-	result_external_ips := make(map[string]compute.StatefulPolicyPreservedStateNetworkIp)
+	preservedState.Disks = disks
+	var change bool
+	change = false
 	<% unless version == "ga" -%>
-	stateful_internal_ips := d.Get("stateful_internal_ip").(*schema.Set).List()
-	for _, raw2 := range stateful_internal_ips {
-		data2 := raw2.(map[string]interface{})
-		internal_ip := compute.StatefulPolicyPreservedStateNetworkIp{
-			AutoDelete: data2["delete_rule"].(string),
+	if d.HasChange("stateful_internal_ip") {
+		oldInternalIps, newInternalIps := d.GetChange("stateful_internal_ip")
+		if len(newInternalIps.(*schema.Set).List()) == 0 {
+			preservedState.NullFields = append(preservedState.NullFields, "internalIPs")
+		} else {
+			preservedState.InternalIPs = expandStatefulIps(oldInternalIps.(*schema.Set).List(), newInternalIps.(*schema.Set).List(), preservedState, "InternalIPs.%s")
 		}
-		result_internal_ips[data2["interface_name"].(string)] = internal_ip
+		change = true
 	}
-	stateful_external_ips := d.Get("stateful_external_ip").(*schema.Set).List()
-	for _, raw3 := range stateful_external_ips {
-		data3 := raw3.(map[string]interface{})
-		external_ip := compute.StatefulPolicyPreservedStateNetworkIp{
-			AutoDelete: data3["delete_rule"].(string),
+	if d.HasChange("stateful_external_ip") {
+		oldExternalIps, newExternalIps := d.GetChange("stateful_external_ip")
+		if len(newExternalIps.(*schema.Set).List()) == 0 {
+			preservedState.NullFields = append(preservedState.NullFields, "externalIPs")
+		} else {
+			preservedState.ExternalIPs = expandStatefulIps(oldExternalIps.(*schema.Set).List(), newExternalIps.(*schema.Set).List(), preservedState, "ExternalIPs.%s")
 		}
-		result_external_ips[data3["interface_name"].(string)] = external_ip
+		change = true
 	}
+	log.Printf("[aaaskubis] preservedState: %s", preservedState)
 	<% end -%>
-	if len(disks) > 0 || len(result_internal_ips) > 0 || len(result_external_ips) > 0 {
-		return &compute.StatefulPolicy{PreservedState: &compute.StatefulPolicyPreservedState{Disks: disks,
-			<% unless version == "ga" -%>
-			InternalIPs: result_internal_ips, ExternalIPs: result_external_ips,
-			<% end -%>
-		}}
+	if len(disks) > 0 || change {
+		statefulPolicy := &compute.StatefulPolicy{PreservedState: preservedState}
+//		statefulPolicy.ForceSendFields = append(statefulPolicy.ForceSendFields, "PreservedState")
+		return statefulPolicy
 	}
 	return nil
 }
+<% unless version == "ga" -%>
+func expandStatefulIps(old []interface{}, new []interface{}, preservedState *compute.StatefulPolicyPreservedState, prefix string) map[string]compute.StatefulPolicyPreservedStateNetworkIp {
+	statefulIpsMap :=	make(map[string]compute.StatefulPolicyPreservedStateNetworkIp)
+
+	for _, raw := range new {
+		data := raw.(map[string]interface{})
+		networkIp := compute.StatefulPolicyPreservedStateNetworkIp{
+			AutoDelete: data["delete_rule"].(string),
+		}
+		statefulIpsMap[data["interface_name"].(string)] = networkIp
+	}
+
+	if len(statefulIpsMap) > 0 {
+		for _, raw := range old {
+			data := raw.(map[string]interface{})
+			k := data["interface_name"].(string)
+			if _, exist := statefulIpsMap[k]; !exist {
+				log.Printf("[aaaskubis] Removing %s: %s", prefix, k)
+
+//				statefulIpsMap[k] = compute.StatefulPolicyPreservedStateNetworkIp{}
+				preservedState.NullFields = append(preservedState.NullFields, fmt.Sprintf(prefix, k))
+			}
+		}
+	}
+	log.Printf("[aaaskubis] statefulIpsMap: %s", statefulIpsMap)
+	return statefulIpsMap
+}
+<% end -%>
 
 func expandVersions(configured []interface{}) []*compute.InstanceGroupManagerVersion {
 	versions := make([]*compute.InstanceGroupManagerVersion, 0, len(configured))
